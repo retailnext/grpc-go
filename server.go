@@ -205,6 +205,12 @@ func (s *Server) Serve(lis net.Listener) error {
 				continue
 			}
 		}
+
+		ctx := context.TODO()
+		if creds, ok := s.opts.creds.(credentials.TransportAuthenticator); ok {
+			ctx = creds.NewServerConn(ctx, c)
+		}
+
 		s.mu.Lock()
 		if s.conns == nil {
 			s.mu.Unlock()
@@ -222,7 +228,7 @@ func (s *Server) Serve(lis net.Listener) error {
 		s.mu.Unlock()
 
 		go func() {
-			st.HandleStreams(func(stream *transport.Stream) {
+			st.HandleStreams(ctx, func(stream *transport.Stream) {
 				s.handleStream(st, stream)
 			})
 			s.mu.Lock()

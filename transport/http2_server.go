@@ -86,6 +86,8 @@ type http2Server struct {
 	streamSendQuota uint32
 }
 
+var _ ServerTransport = (*http2Server)(nil)
+
 // newHTTP2Server constructs a ServerTransport based on HTTP2. ConnectionError is
 // returned if something goes wrong.
 func newHTTP2Server(conn net.Conn, maxStreams uint32) (_ ServerTransport, err error) {
@@ -137,7 +139,7 @@ func newHTTP2Server(conn net.Conn, maxStreams uint32) (_ ServerTransport, err er
 // operateHeader takes action on the decoded headers. It returns the current
 // stream if there are remaining headers on the wire (in the following
 // Continuation frame).
-func (t *http2Server) operateHeaders(hDec *hpackDecoder, s *Stream, frame headerFrame, endStream bool, handle func(*Stream), wg *sync.WaitGroup) (pendingStream *Stream) {
+func (t *http2Server) operateHeaders(ctx context.Context, hDec *hpackDecoder, s *Stream, frame headerFrame, endStream bool, handle func(*Stream), wg *sync.WaitGroup) (pendingStream *Stream) {
 	defer func() {
 		if pendingStream == nil {
 			hDec.state = decodeState{}
@@ -179,9 +181,9 @@ func (t *http2Server) operateHeaders(hDec *hpackDecoder, s *Stream, frame header
 		t.updateWindow(s, uint32(n))
 	}
 	if hDec.state.timeoutSet {
-		s.ctx, s.cancel = context.WithTimeout(context.TODO(), hDec.state.timeout)
+		s.ctx, s.cancel = context.WithTimeout(ctx, hDec.state.timeout)
 	} else {
-		s.ctx, s.cancel = context.WithCancel(context.TODO())
+		s.ctx, s.cancel = context.WithCancel(ctx)
 	}
 	// Cache the current stream to the context so that the server application
 	// can find out. Required when the server wants to send some metadata
@@ -208,7 +210,7 @@ func (t *http2Server) operateHeaders(hDec *hpackDecoder, s *Stream, frame header
 
 // HandleStreams receives incoming streams using the given handler. This is
 // typically run in a separate goroutine.
-func (t *http2Server) HandleStreams(handle func(*Stream)) {
+func (t *http2Server) HandleStreams(ctx context.Context, handle func(*Stream)) {
 	// Check the validity of client preface.
 	preface := make([]byte, len(clientPreface))
 	if _, err := io.ReadFull(t.conn, preface); err != nil {
@@ -268,9 +270,9 @@ func (t *http2Server) HandleStreams(handle func(*Stream)) {
 				fc:  fc,
 			}
 			endStream := frame.Header().Flags.Has(http2.FlagHeadersEndStream)
-			curStream = t.operateHeaders(hDec, curStream, frame, endStream, handle, &wg)
+			curStream = t.operateHeaders(ctx, hDec, curStream, frame, endStream, handle, &wg)
 		case *http2.ContinuationFrame:
-			curStream = t.operateHeaders(hDec, curStream, frame, false, handle, &wg)
+			curStream = t.operateHeaders(ctx, hDec, curStream, frame, false, handle, &wg)
 		case *http2.DataFrame:
 			t.handleData(frame)
 		case *http2.RSTStreamFrame:

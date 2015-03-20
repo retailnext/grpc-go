@@ -91,6 +91,8 @@ type TransportAuthenticator interface {
 	ServerHandshake(rawConn net.Conn) (net.Conn, error)
 	// Info provides the ProtocolInfo of this TransportAuthenticator.
 	Info() ProtocolInfo
+	// NewServerConn is called in the server for every new connection.
+	NewServerConn(ctx context.Context, conn net.Conn) context.Context
 	Credentials
 }
 
@@ -165,6 +167,10 @@ func NewTLS(c *tls.Config) TransportAuthenticator {
 	tc := &tlsCreds{*c}
 	tc.config.NextProtos = alpnProtoStr
 	return tc
+}
+
+func (c *tlsCreds) NewServerConn(ctx context.Context, conn net.Conn) context.Context {
+	return ctx
 }
 
 // NewClientTLSFromCert constructs a TLS from the input certificate for client.
